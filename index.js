@@ -7,6 +7,11 @@ import {
 
 const client = new S3Client();
 
+function isOlder(d) {
+    const start = new Date('01/05/2023');    
+    return new Date(d) < start;
+}
+
 async function listBuckets() {
     const command = new ListBucketsCommand();
     const response = await client.send(command);
@@ -22,8 +27,11 @@ async function listObjects(bucket) {
             Bucket: bucket,
             ContinuationToken: next
         });
-        response = await client.send(command);        
-        objects.push(...response.Contents.map(c => c.Key));
+        response = await client.send(command);
+        const old = response.Contents
+            .filter(c => isOlder(c.LastModified))
+            .map(c => c.Key)
+        objects.push(...old);
     }while (response.IsTruncated);
     return objects;
 }
