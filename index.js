@@ -7,22 +7,13 @@ import {
 
 const client = new S3Client();
 
-async function getBuckets() {
+async function listBuckets() {
     const command = new ListBucketsCommand();
     const response = await client.send(command);
     return response.Buckets.map(b => b.Name);
 }
 
-async function getObject(bucket, key) {
-    const command = new GetObjectCommand({
-        Bucket: bucket,
-        Key: key
-    });
-    const response = await client.send(command);
-    return { name: key, sse: response.ServerSideEncryption };
-}
-
-async function getObjects(bucket) {
+async function listObjects(bucket) {
     let response = {};
     const objects = [];
     do{
@@ -37,12 +28,20 @@ async function getObjects(bucket) {
     return objects;
 }
 
+async function getObject(bucket, key) {
+    const command = new GetObjectCommand({
+        Bucket: bucket,
+        Key: key
+    });
+    const response = await client.send(command);
+    return { name: key, sse: response.ServerSideEncryption };
+}
 
 try {
-    const buckets = await getBuckets();
+    const buckets = await listBuckets();
     for (const b of buckets) {
         console.log('bucket = ', b);
-        const objects = await getObjects(b);
+        const objects = await listObjects(b);
         for (const key of objects) { 
             const obj = await getObject(b, key);
             if (!obj.sse) console.log(obj);
