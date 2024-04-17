@@ -18,22 +18,29 @@ async function listBuckets() {
     return response.Buckets.map(b => b.Name);
 }
 
-async function listObjects(bucket) {
-    let response = {};
-    const objects = [];
-    do{
-        const next = response.NextContinuationToken;
-        const command = new ListObjectsV2Command({
-            Bucket: bucket,
-            ContinuationToken: next
-        });
-        response = await client.send(command);
-        const old = response.Contents
-            .filter(c => isOlder(c.LastModified))
-            .map(c => c.Key)
-        objects.push(...old);
-    }while (response.IsTruncated);
-    return objects;
+async function next(bucket, token) {
+    const command = new ListObjectsV2Command({
+        MaxKeys: 50,
+        Bucket: bucket,
+        ContinuationToken: token
+    });
+    const response = await client.send(command);
+    return {
+        isTruncated: response.IsTruncated,
+        token: response.NextContinuationToken,
+        keys: response.Contents.filter(c => isOlder(c.LastModified)).map(c => c.Key)
+    }
+}
+
+async function verify(bucket) {
+    let batch = {};
+    do {
+        batch = await next(bucket, batch.token);
+        for (const key of batch.keys) { 
+            const obj = await getObject(bucket, key);
+            if (!obj.sse) console.log(obj);
+        }
+    } while (batch.isTruncated)
 }
 
 async function getObject(bucket, key) {
@@ -49,11 +56,7 @@ try {
     const buckets = await listBuckets();
     for (const b of buckets) {
         console.log('bucket = ', b);
-        const objects = await listObjects(b);
-        for (const key of objects) { 
-            const obj = await getObject(b, key);
-            if (!obj.sse) console.log(obj);
-        }
+        await verify(b);
     }
 } catch (e) {
     console.error(e);
