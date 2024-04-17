@@ -12,10 +12,19 @@ function isOlder(d) {
     return new Date(d) < start;
 }
 
+async function getObject(bucket, key) {
+    const command = new GetObjectCommand({
+        Bucket: bucket,
+        Key: key
+    });
+    const response = await client.send(command);
+    return { name: key, sse: response.ServerSideEncryption };
+}
+
 async function listBuckets() {
     const command = new ListBucketsCommand();
     const response = await client.send(command);
-    return response.Buckets.map(b => b.Name);
+    return response.Buckets.filter(b => isOlder(b.CreationDate)).map(b => b.Name);
 }
 
 async function next(bucket, token) {
@@ -41,15 +50,6 @@ async function verify(bucket) {
             if (!obj.sse) console.log(obj);
         }
     } while (batch.isTruncated)
-}
-
-async function getObject(bucket, key) {
-    const command = new GetObjectCommand({
-        Bucket: bucket,
-        Key: key
-    });
-    const response = await client.send(command);
-    return { name: key, sse: response.ServerSideEncryption };
 }
 
 try {
