@@ -1,62 +1,80 @@
 import { 
     S3Client,
-    GetObjectCommand,
-    ListBucketsCommand, 
-    ListObjectsV2Command
+    ListBucketsCommand,
+    CreateBucketCommand,
+    PutBucketPolicyCommand,
+    PutBucketInventoryConfigurationCommand
 } from "@aws-sdk/client-s3";
 
-const client = new S3Client();
+const start = new Date('01/05/2026');
+const client = new S3Client({region: 'us-east-1'});
+const dest = process.argv[2] || `inventory-${Date.now()}`;
 
-function isOlder(d) {
-    const start = new Date('01/05/2023');    
-    return new Date(d) < start;
-}
-
-async function getObject(bucket, key) {
-    const command = new GetObjectCommand({
-        Bucket: bucket,
-        Key: key
+async function createDest() {
+    console.log('create dest bucket', dest);
+    const create = new CreateBucketCommand({ 
+        Bucket: dest 
     });
-    const response = await client.send(command);
-    return { name: key, sse: response.ServerSideEncryption };
+    const policy = new PutBucketPolicyCommand({
+        Bucket: dest,
+        Policy: JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [{
+                Sid: "Inventory",
+                Effect: "Allow",
+                Principal: {
+                    Service: "s3.amazonaws.com",
+                },
+                Action: "s3:PutObject",
+                Resource: `arn:aws:s3:::${dest}/*`,
+            }],
+        })
+    });
+    await client.send(create);
+    await client.send(policy);
 }
 
 async function listBuckets() {
     const command = new ListBucketsCommand();
     const response = await client.send(command);
-    return response.Buckets.filter(b => isOlder(b.CreationDate)).map(b => b.Name);
+    return response.Buckets
+        .filter(b => b.Name != dest && b.CreationDate < start)
+        .map(b => b.Name);
 }
 
-async function next(bucket, token) {
-    const command = new ListObjectsV2Command({
-        MaxKeys: 50,
+async function inventory(bucket) {
+    console.log('configuring inventory for ', bucket);
+    const id = 'sse';
+    const command = new PutBucketInventoryConfigurationCommand({
         Bucket: bucket,
-        ContinuationToken: token
+        Id: id,
+        InventoryConfiguration: {
+            Id: id,
+            IsEnabled: true,
+            IncludedObjectVersions: 'All',
+            Schedule: {
+                Frequency: 'Daily'
+            },
+            OptionalFields: [
+                'EncryptionStatus',
+                'LastModifiedDate'
+            ],
+            Destination: {
+                S3BucketDestination: {
+                    Bucket: `arn:aws:s3:::${dest}`,
+                    Format: 'CSV'
+                }
+            }
+        }
     });
     const response = await client.send(command);
-    return {
-        isTruncated: response.IsTruncated,
-        token: response.NextContinuationToken,
-        keys: response.Contents.filter(c => isOlder(c.LastModified)).map(c => c.Key)
-    }
-}
-
-async function verify(bucket) {
-    let batch = {};
-    do {
-        batch = await next(bucket, batch.token);
-        for (const key of batch.keys) { 
-            const obj = await getObject(bucket, key);
-            if (!obj.sse) console.log(obj);
-        }
-    } while (batch.isTruncated)
 }
 
 try {
+    await createDest();
     const buckets = await listBuckets();
     for (const b of buckets) {
-        console.log('bucket = ', b);
-        await verify(b);
+        await inventory(b);
     }
 } catch (e) {
     console.error(e);
